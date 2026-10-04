@@ -6,7 +6,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Eski jadvalni o'chirib, yangisini yaratish
     cur.execute("DROP TABLE IF EXISTS records")
     cur.execute("DROP TABLE IF EXISTS late_counts")
     cur.execute("DROP TABLE IF EXISTS fullname_counts")
@@ -18,10 +17,8 @@ def init_db():
             postdagi_odam TEXT,
             familiya TEXT,
             ism TEXT,
-            otasining_ismi TEXT,
-            telefon TEXT,
-            photo_path TEXT,
-            reason TEXT,
+            fakultet TEXT,
+            kurs TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -45,17 +42,14 @@ def init_db():
     print("✅ Baza tayyor:", DB_PATH)
 
 
-def add_record(telegram_id, postdagi_odam, familiya, ism, otasining_ismi,
-               telefon, photo_path, reason):
+def add_record(telegram_id, postdagi_odam, familiya, ism, fakultet, kurs):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO records
-        (telegram_id, postdagi_odam, familiya, ism, otasining_ismi,
-         telefon, photo_path, reason)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (telegram_id, postdagi_odam, familiya, ism, otasining_ismi,
-          telefon, photo_path, reason))
+        (telegram_id, postdagi_odam, familiya, ism, fakultet, kurs)
+        VALUES (?,?,?,?,?,?)
+    """, (telegram_id, postdagi_odam, familiya, ism, fakultet, kurs))
     conn.commit()
     conn.close()
 
@@ -112,22 +106,3 @@ def get_fullname_count(fullname):
     row = cur.fetchone()
     conn.close()
     return row[0] if row else 0
-
-
-def reset_counts():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM late_counts")
-    cur.execute("DELETE FROM fullname_counts")
-    conn.commit()
-    conn.close()
-
-
-def clear_all():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM records")
-    cur.execute("DELETE FROM late_counts")
-    cur.execute("DELETE FROM fullname_counts")
-    conn.commit()
-    conn.close()
