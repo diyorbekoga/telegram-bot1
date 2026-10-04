@@ -1,5 +1,4 @@
 import asyncio
-import os
 import logging
 from datetime import datetime
 
@@ -18,8 +17,9 @@ from config import (
     MAX_SAME_NAME, BLOCK_LIMIT
 )
 from database import (
-    init_db, add_record, increase_count, get_count,
-    increase_fullname_count, get_fullname_count
+    init_db, add_record,
+    increase_fullname_count, get_fullname_count,
+    increase_user_count, get_user_count
 )
 
 logging.basicConfig(
@@ -57,17 +57,6 @@ def next_student_keyboard():
 @dp.message(Command("start"))
 async def start_cmd(message: Message, state: FSMContext):
     await state.clear()
-    user_id = message.from_user.id
-
-    count = get_count(user_id)
-    if count >= BLOCK_LIMIT:
-        await message.answer(
-            f"⛔ <b>Siz allaqachon {BLOCK_LIMIT} marta kech qolgansiz!</b>\n\n"
-            f"Sizni tizimga kirita olmaymiz.\n"
-            f"Rahbariyat bilan bog'laning.",
-            parse_mode="HTML"
-        )
-        return
 
     await message.answer(
         "👋 Assalomu alaykum!\n\n"
@@ -132,14 +121,13 @@ async def change_postdagi(callback: CallbackQuery, state: FSMContext):
 
 
 # ============================================================
-# 2: F.I.Sh. + Fakultet + Kurs (bitta xabarda)
+# 2: F.I.Sh. + Fakultet + Kurs
 # ============================================================
 @dp.message(Form.waiting_data, F.text)
 async def get_data(message: Message, state: FSMContext):
     text = message.text.strip()
     parts = text.split()
 
-    # Kamida 4 ta so'z: Familiya, Ism, Fakultet, Kurs
     if len(parts) < 4:
         await message.answer(
             "❗ Ma'lumot to'liq emas.\n\n"
@@ -153,87 +141,93 @@ async def get_data(message: Message, state: FSMContext):
 
     familiya = parts[0]
     ism = parts[1]
-    kurs = parts[-1]                     # oxirgi so'z — kurs
-    fakultet = " ".join(parts[2:-1])     # o'rtadagi so'zlar — fakultet
-
+    kurs = parts[-1]
+    fakultet = " ".join(parts[2:-1])
     fullname = f"{familiya} {ism}"
 
-    # F.I.Sh. 4 marta tekshiruvi
-    existing = get_fullname_count(fullname)
-    if existing >= MAX_SAME_NAME:
-        await state.clear()
+    # ============================================================
+    # F.I.Sh. bo'yicha hisoblash — o'quvchi 3 marta kech qolsa blok
+    # ============================================================
+    existing_fio_count = get_fullname_count(fullname)
+
+    # Agar o'quvchi allaqachon 3 marta kech qolgan bo'lsa
+    if existing_fio_count >= BLOCK_LIMIT:
         await message.answer(
-            f"⛔ <b>Bu F.I.Sh. allaqachon {MAX_SAME_NAME} marta yozilgan!</b>\n\n"
-            f"👤 {fullname}\n\n"
-            f"Boshqa F.I.Sh. bilan qaytadan urinib ko'ring.\n\n"
-            f"Qaytadan boshlash uchun /start bosing.",
+            f"⛔ <b>Bu o'quvchi allaqachon {BLOCK_LIMIT} marta kech qolgan!</b>\n\n"
+            f"👤 <b>{fullname}</b>\n"
+            f"🏛 {fakultet} | 📚 {kurs}\n\n"
+            f"Bu o'quvchi tizimga <b>kiritilmaydi</b>.",
             parse_mode="HTML"
         )
         return
 
-    await state.update_data(
-        familiya=familiya,
-        ism=ism,
-        fakultet=fakultet,
-        kurs=kurs,
-        fullname=fullname
-    )
+    # 4 martalik cheklov (bir xil F.I.Sh. juda ko'p takrorlanmasin)
+    if existing_fio_count >= MAX_SAME_NAME:
+        await message.answer(
+            f"⛔ <b>Bu F.I.Sh. allaqachon {MAX_SAME_NAME} marta yozilgan!</b>\n\n"
+            f"👤 {fullname}",
+            parse_mode="HTML"
+        )
+        return
 
-    # Saqlash
+    # Bazaga saqlash
     data = await state.get_data()
     postdagi_odam = data.get("postdagi_odam", "Noma'lum")
     user_id = message.from_user.id
 
-    new_fio_count = increase_fullname_count(fullname)
-
     add_record(user_id, postdagi_odam, familiya, ism, fakultet, kurs)
 
-    new_count = increase_count(user_id)
+    # F.I.Sh. bo'yicha hisobni oshirish
+    new_fio_count = increase_fullname_count(fullname)
+
+    # Postdagi odamning umumiy yozuv soni
+    new_user_count = increase_user_count(user_id)
 
     caption = (
         f"🆕 <b>Yangi kech qolish</b>\n\n"
         f"👤 <b>F.I.Sh.:</b> {fullname}\n"
         f"🏛 <b>Fakultet:</b> {fakultet}\n"
         f"📚 <b>Kurs:</b> {kurs}\n"
-        f"🔢 <b>Jami:</b> {new_count} marta\n"
-        f"📊 <b>Bu F.I.Sh.:</b> {new_fio_count} marta\n"
+        f"📊 <b>Bu o'quvchi:</b> {new_fio_count} marta\n"
         f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👮 <b>Postdagi odam:</b> {postdagi_odam}"
+        f"👮 <b>Postdagi odam:</b> {postdagi_odam}\n"
+        f"📝 <b>Jami yozuvlar:</b> {new_user_count}"
     )
 
-    # Adminlarga parallel yuborish
+    # Adminlarga yuborish
     async def send_to_admin(admin_id):
         try:
-            await bot.send_message(
-                admin_id,
-                caption,
-                parse_mode="HTML"
-            )
+            await bot.send_message(admin_id, caption, parse_mode="HTML")
         except Exception as e:
             logging.error(f"Admin {admin_id} ga yuborilmadi: {e}")
 
     await asyncio.gather(*[send_to_admin(aid) for aid in ADMIN_IDS])
 
-    # 3 marta blok
-    if new_count >= BLOCK_LIMIT:
+    # ============================================================
+    # O'QUVCHI 3 MARTA KECH QOLSA — BLOK
+    # ============================================================
+    if new_fio_count >= BLOCK_LIMIT:
         if CHANNEL_ID:
             try:
                 await bot.send_message(
                     CHANNEL_ID,
-                    f"🚨 <b>DIQQAT!</b>\n\n{caption}",
+                    f"🚨 <b>DIQQAT! O'QUVCHI {BLOCK_LIMIT} MARTA KECH QOLDI!</b>\n\n{caption}",
                     parse_mode="HTML"
                 )
             except Exception as e:
                 logging.error(f"Kanalga yuborilmadi: {e}")
 
         await message.answer(
-            f"⛔ <b>SIZ {BLOCK_LIMIT} MARTA KECH QOLDINGIZ!</b>\n\n"
-            f"Endi sizni tizimga <b>kirita olmaymiz</b>.\n"
-            f"Iltimos, rahbariyat bilan bog'laning.",
+            f"⛔ <b>DIQQAT!</b>\n\n"
+            f"👤 <b>{fullname}</b>\n"
+            f"🏛 {fakultet} | 📚 {kurs}\n\n"
+            f"Bu o'quvchi <b>{BLOCK_LIMIT} marta</b> kech qoldi!\n"
+            f"Endi u tizimga <b>kiritilmaydi</b>.",
             parse_mode="HTML"
         )
 
+        # Adminlarga alohida ogohlantirish
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -241,19 +235,19 @@ async def get_data(message: Message, state: FSMContext):
                     f"🚨 <b>DIQQAT!</b>\n\n"
                     f"👤 <b>{fullname}</b>\n"
                     f"🏛 {fakultet} | 📚 {kurs}\n"
-                    f"{BLOCK_LIMIT} marta kech qoldi va <b>bloklandi</b>.",
+                    f"<b>{BLOCK_LIMIT} marta</b> kech qoldi va bloklandi.",
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
     else:
-        qolgan = BLOCK_LIMIT - new_count
+        qolgan = BLOCK_LIMIT - new_fio_count
         await message.answer(
             f"✅ <b>Qabul qilindi!</b>\n\n"
             f"👤 {fullname}\n"
             f"🏛 {fakultet} | 📚 {kurs}\n"
-            f"🔢 Sizning kech qolishlaringiz: <b>{new_count}</b>\n\n"
-            f"⚠️ Yana <b>{qolgan} marta</b> kech qolsangiz — bloklanasiz!",
+            f"📊 Bu o'quvchi: <b>{new_fio_count}</b> marta\n\n"
+            f"⚠️ Yana <b>{qolgan} marta</b> kech qolsa — bloklanadi!",
             parse_mode="HTML"
         )
 
@@ -293,7 +287,7 @@ async def stats_cmd(message: Message):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("SELECT full_name, count FROM late_counts ORDER BY count DESC LIMIT 20")
+    cur.execute("SELECT fullname, count FROM fullname_counts ORDER BY count DESC LIMIT 20")
     rows = cur.fetchall()
     conn.close()
 
@@ -301,7 +295,7 @@ async def stats_cmd(message: Message):
         await message.answer("Hozircha ma'lumot yo'q.")
         return
 
-    text = "📊 <b>Kech qolish statistikasi</b>\n\n"
+    text = "📊 <b>O'quvchilar statistikasi</b>\n\n"
     for i, (name, count) in enumerate(rows, 1):
         emoji = "🔴" if count >= BLOCK_LIMIT else "🟡" if count == 2 else "🟢"
         text += f"{i}. {emoji} {name} — <b>{count}</b> marta\n"
@@ -321,8 +315,8 @@ async def reset_cmd(message: Message):
     from config import DB_PATH
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("DELETE FROM late_counts")
     cur.execute("DELETE FROM fullname_counts")
+    cur.execute("DELETE FROM user_counts")
     conn.commit()
     conn.close()
     await message.answer("✅ Hisoblagichlar nolga tushirildi.")
@@ -336,7 +330,7 @@ async def main():
     print("=" * 50)
     print("🤖 Bot ishga tushdi...")
     print(f"👤 Adminlar: {ADMIN_IDS}")
-    print(f"⛔ Blok limiti: {BLOCK_LIMIT} marta")
+    print(f"⛔ O'quvchi blok limiti: {BLOCK_LIMIT} marta")
     print(f"🔁 Bir xil F.I.Sh. limiti: {MAX_SAME_NAME} marta")
     print("=" * 50)
     await dp.start_polling(bot)
